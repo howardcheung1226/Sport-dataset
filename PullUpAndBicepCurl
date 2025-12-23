@@ -1,1 +1,253 @@
+"""
+Linear regression analysis: Weighted pull-up added weight (kg) ~ Machine bicep curl 1RM (kg)
 
+This script:
+- Loads the provided dataset (embedded CSV string).
+- Fits an OLS linear regression model (statsmodels).
+- Prints model summary (coefficients, R-squared, p-values).
+- Plots scatter + regression line, residual diagnostics, QQ-plot.
+- Runs tests: Shapiro-Wilk (normality), Breusch-Pagan (heteroscedasticity),
+  Durbin-Watson (autocorrelation).
+- Computes prediction with 95% confidence and prediction intervals.
+- Computes Cook's distance and flags potential influential points.
+- Saves plots and prediction CSV to working directory.
+
+Usage:
+    python linear_regression_analysis.py
+
+Dependencies:
+    pip install pandas numpy matplotlib seaborn statsmodels scipy
+
+Author: Generated (2025-12-23)
+"""
+import io
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from statsmodels.stats.diagnostic import het_breuschpagan
+from statsmodels.stats.outliers_influence import OLSInfluence
+from scipy import stats
+
+# -------------------------
+# 1. Load dataset (embedded CSV)
+# -------------------------
+csv_data = """ID,BicepCurl_1RM_kg,WeightedPullup_added_kg
+1,46.2,22.0
+2,33.5,5.0
+3,50.1,30.5
+4,28.7,12.0
+5,39.8,18.0
+6,41.3,15.5
+7,35.0,8.0
+8,44.6,25.0
+9,37.9,17.0
+10,29.4,4.0
+11,48.8,28.0
+12,42.7,20.5
+13,31.6,6.5
+14,54.2,35.0
+15,38.4,16.0
+16,45.0,24.0
+17,36.1,10.0
+18,47.5,26.5
+19,40.9,19.0
+20,26.8,3.0
+21,43.2,23.0
+22,34.7,7.5
+23,51.3,31.0
+24,39.0,18.5
+25,30.2,2.0
+26,55.6,36.0
+27,49.0,29.0
+28,32.5,6.0
+29,41.8,21.0
+30,27.9,5.5
+31,45.9,27.5
+32,37.0,14.0
+33,52.1,33.0
+34,33.0,9.0
+35,38.9,17.5
+36,44.0,24.5
+37,29.9,4.5
+38,46.8,22.5
+39,35.7,8.5
+40,43.9,23.8
+41,36.8,11.2
+42,50.5,30.0
+43,28.1,3.8
+44,39.5,19.5
+45,47.0,25.8
+46,31.2,6.8
+47,54.9,34.5
+48,42.0,18.8
+49,34.1,7.0
+50,40.3,20.0
+"""
+df = pd.read_csv(io.StringIO(csv_data))
+df.set_index("ID", inplace=True)
+
+# Quick look
+print("First 6 rows:")
+print(df.head(6))
+print("\nSummary statistics:")
+print(df.describe())
+
+# -------------------------
+# 2. Scatter plot + regression line
+# -------------------------
+sns.set(style="whitegrid")
+plt.figure(figsize=(8,6))
+sns.regplot(x="BicepCurl_1RM_kg", y="WeightedPullup_added_kg", data=df,
+            ci=95, scatter_kws={"s":50, "alpha":0.7}, line_kws={"color":"red"})
+plt.title("Weighted pull-up (added kg) vs Machine bicep curl 1RM (kg)")
+plt.xlabel("Bicep curl 1RM (kg)")
+plt.ylabel("Weighted pull-up added weight (kg)")
+plt.tight_layout()
+plt.savefig("scatter_regression.png", dpi=150)
+plt.close()
+
+# -------------------------
+# 3. Fit OLS model using statsmodels
+#    Model: WeightedPullup_added_kg ~ BicepCurl_1RM_kg
+# -------------------------
+y = df["WeightedPullup_added_kg"]
+X = sm.add_constant(df["BicepCurl_1RM_kg"])  # adds intercept term
+model = sm.OLS(y, X).fit()
+print("\nOLS regression results summary:")
+print(model.summary())
+
+# Extract key values
+coef_intercept = model.params["const"]
+coef_slope = model.params["BicepCurl_1RM_kg"]
+r_squared = model.rsquared
+pvals = model.pvalues
+
+print(f"\nModel: WeightedPullup_added_kg = {coef_intercept:.3f} + {coef_slope:.3f} * BicepCurl_1RM_kg")
+print(f"R-squared: {r_squared:.3f}")
+print(f"P-value (slope): {pvals['BicepCurl_1RM_kg']:.4f}")
+
+# -------------------------
+# 4. Predictions + 95% CI and Prediction Intervals
+# -------------------------
+# Create new values for plotting/prediction
+x_new = np.linspace(df["BicepCurl_1RM_kg"].min(), df["BicepCurl_1RM_kg"].max(), 100)
+X_new = sm.add_constant(x_new)
+pred = model.get_prediction(X_new)
+pred_df = pred.summary_frame(alpha=0.05)  # columns: mean, mean_se, mean_ci_lower, mean_ci_upper, obs_ci_lower, obs_ci_upper
+pred_df["BicepCurl_1RM_kg"] = x_new
+pred_df.to_csv("predictions_with_intervals.csv", index=False)
+print("\nSaved predictions with 95% CI and prediction intervals to predictions_with_intervals.csv")
+
+# -------------------------
+# 5. Residual diagnostics
+# -------------------------
+residuals = model.resid
+fitted = model.fittedvalues
+
+# Residuals vs Fitted
+plt.figure(figsize=(8,5))
+plt.scatter(fitted, residuals, s=50, alpha=0.7)
+plt.axhline(0, color="red", linestyle="--")
+plt.xlabel("Fitted values")
+plt.ylabel("Residuals")
+plt.title("Residuals vs Fitted")
+plt.tight_layout()
+plt.savefig("residuals_vs_fitted.png", dpi=150)
+plt.close()
+
+# QQ-plot of residuals
+fig = sm.qqplot(residuals, line="45", fit=True)
+plt.title("QQ-plot of residuals")
+plt.tight_layout()
+plt.savefig("qqplot_residuals.png", dpi=150)
+plt.close()
+
+# Histogram of residuals
+plt.figure(figsize=(7,4))
+sns.histplot(residuals, kde=True)
+plt.title("Residuals distribution")
+plt.xlabel("Residual")
+plt.tight_layout()
+plt.savefig("residuals_hist.png", dpi=150)
+plt.close()
+
+# Shapiro-Wilk test for normality
+shapiro_stat, shapiro_p = stats.shapiro(residuals)
+print(f"\nShapiro-Wilk test: W = {shapiro_stat:.4f}, p = {shapiro_p:.4f}")
+if shapiro_p < 0.05:
+    print(" -> Residuals deviate from normality (p < 0.05).")
+else:
+    print(" -> Residuals do not significantly deviate from normality (p >= 0.05).")
+
+# Breusch-Pagan test for heteroscedasticity
+bp_test = het_breuschpagan(residuals, X)  # returns (lm_stat, lm_pvalue, f_stat, f_pvalue)
+bp_labels = ["Lagrange multiplier stat", "LM p-value", "F-stat", "F p-value"]
+print("\nBreusch-Pagan test for heteroscedasticity:")
+for lab, val in zip(bp_labels, bp_test):
+    print(f"  {lab}: {val:.4f}")
+if bp_test[1] < 0.05:
+    print(" -> Evidence of heteroscedasticity (LM p-value < 0.05).")
+else:
+    print(" -> No evidence of heteroscedasticity (LM p-value >= 0.05).")
+
+# Durbin-Watson test for autocorrelation
+dw = sm.stats.stattools.durbin_watson(residuals)
+print(f"\nDurbin-Watson statistic: {dw:.4f} (close to 2 suggests no autocorrelation)")
+
+# -------------------------
+# 6. Influence measures: Cook's distance
+# -------------------------
+influence = OLSInfluence(model)
+cooks_d = influence.cooks_distance[0]
+df_influence = pd.DataFrame({
+    "BicepCurl_1RM_kg": df["BicepCurl_1RM_kg"],
+    "WeightedPullup_added_kg": df["WeightedPullup_added_kg"],
+    "Fitted": fitted,
+    "Residuals": residuals,
+    "CooksD": cooks_d
+}, index=df.index)
+
+# Flag potentially influential points: rule of thumb Cook's D > 4/n
+threshold = 4 / len(df)
+influential_points = df_influence[df_influence["CooksD"] > threshold]
+print(f"\nCook's distance threshold (4/n): {threshold:.4f}")
+if not influential_points.empty:
+    print("Potentially influential observations (Cook's D > threshold):")
+    print(influential_points.sort_values("CooksD", ascending=False))
+else:
+    print("No observations with Cook's D above threshold.")
+
+# Save influence table
+df_influence.to_csv("influence_measures.csv")
+
+# Optionally: plot Cook's distances
+plt.figure(figsize=(8,4))
+plt.stem(df.index, cooks_d, use_line_collection=True)
+plt.axhline(threshold, color="red", linestyle="--", label=f"4/n = {threshold:.3f}")
+plt.xlabel("ID")
+plt.ylabel("Cook's distance")
+plt.title("Cook's distance per observation")
+plt.legend()
+plt.tight_layout()
+plt.savefig("cooks_distance.png", dpi=150)
+plt.close()
+
+# -------------------------
+# 7. Short interpretation guidance printed to console
+# -------------------------
+print("\n--- Interpretation guidance ---")
+print("1) The model summary above shows the estimated intercept and slope, their standard errors,")
+print("   t-statistics and p-values. A small p-value for the slope (<0.05) suggests a statistically")
+print("   significant linear relationship between bicep curl 1RM and weighted pull-up added weight.")
+print("2) R-squared indicates the proportion of variance in weighted pull-up added weight explained")
+print("   by bicep curl 1RM (values between 0-1).")
+print("3) Check residual diagnostics (saved PNGs) for normality, constant variance, and outliers.")
+print("4) If heteroscedasticity is present, consider robust standard errors or transform variables.")
+print("5) If influential points exist, inspect those participants (IDs) before removing them.")
+print("\nFiles saved: scatter_regression.png, predictions_with_intervals.csv, residuals_vs_fitted.png,")
+print("qqplot_residuals.png, residuals_hist.png, influence_measures.csv, cooks_distance.png")
+
+# End of script
